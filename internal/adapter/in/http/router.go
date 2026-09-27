@@ -2,6 +2,8 @@ package http
 
 import (
 	"net/http"
+	"slices"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -55,14 +57,20 @@ func NewRouter(uc UseCases, corsOrigin string) http.Handler {
 	return r
 }
 
-// cors habilita un único origen conocido (el frontend). En producción el proxy nginx
-// sirve todo desde el mismo origen y este middleware ni se usa.
-func cors(origin string) func(http.Handler) http.Handler {
+// cors habilita un allowlist de orígenes conocidos (coma-separados: el frontend
+// standalone y, en la plataforma AFWILTO, también el shell host). En producción el
+// proxy nginx sirve todo desde el mismo origen y este middleware ni se usa.
+func cors(originList string) func(http.Handler) http.Handler {
+	allowed := strings.Split(originList, ",")
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Access-Control-Allow-Origin", origin)
-			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PATCH, OPTIONS")
-			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-Member-Id")
+			origin := r.Header.Get("Origin")
+			if origin != "" && slices.Contains(allowed, origin) {
+				w.Header().Set("Access-Control-Allow-Origin", origin)
+				w.Header().Set("Vary", "Origin")
+				w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PATCH, OPTIONS")
+				w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-Member-Id")
+			}
 			if r.Method == http.MethodOptions {
 				w.WriteHeader(http.StatusNoContent)
 				return
