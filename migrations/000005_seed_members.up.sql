@@ -1,0 +1,4 @@
+INSERT INTO members (id, display_name, color) VALUES
+    ('11111111-1111-4111-8111-111111111111', 'Lini (ojitos)', '#008080'),
+    ('22222222-2222-4222-8222-222222222222', 'Andres', '#0B192C')
+ON CONFLICT (id) DO NOTHING;

@@ -1,0 +1,344 @@
+openapi: 3.0.3
+info:
+  title: Banco de Puntitos API
+  version: 1.0.0
+  description: >
+    Registro privado de dos titulares. Cada puntito exige justificación.
+    Errores en formato RFC 7807 (application/problem+json).
+servers:
+  - url: /api/v1
+
+components:
+  parameters:
+    MemberIdHeader:
+      name: X-Member-Id
+      in: header
+      required: true
+      description: UUID del titular que realiza la operación (actor).
+      schema: { type: string, format: uuid }
+  schemas:
+    Entry:
+      type: object
+      required: [id, awarded_to, awarded_by, amount, reason, occurred_at, status, created_at, updated_at]
+      properties:
+        id:          { type: string, format: uuid }
+        awarded_to:  { type: string, format: uuid }
+        awarded_by:  { type: string, format: uuid }
+        amount:      { type: integer, minimum: 1, maximum: 5 }
+        reason:      { type: string, minLength: 10 }
+        occurred_at: { type: string, format: date-time }
+        status:      { type: string, enum: [active, voided] }
+        created_at:  { type: string, format: date-time }
+        updated_at:  { type: string, format: date-time }
+    AwardRequest:
+      type: object
+      required: [awarded_to, amount, reason, occurred_at]
+      properties:
+        awarded_to:  { type: string, format: uuid }
+        amount:      { type: integer, minimum: 1, maximum: 5 }
+        reason:      { type: string, minLength: 10 }
+        occurred_at: { type: string, format: date-time }
+    EditRequest:
+      type: object
+      required: [amount, reason, occurred_at]
+      properties:
+        amount:      { type: integer, minimum: 1, maximum: 5 }
+        reason:      { type: string, minLength: 10 }
+        occurred_at: { type: string, format: date-time }
+    LedgerPage:
+      type: object
+      required: [entries, next_cursor]
+      properties:
+        entries:
+          type: array
+          items: { $ref: '#/components/schemas/Entry' }
+        next_cursor:
+          type: string
+          nullable: true
+          description: Cursor opaco para la página siguiente; nulo si no hay más.
+    Balance:
+      type: object
+      required: [member_id, display_name, points_earned, entries_count, last_entry_at, points_redeemed, points_available]
+      properties:
+        member_id:       { type: string, format: uuid }
+        display_name:    { type: string }
+        points_earned:   { type: integer }
+        entries_count:   { type: integer }
+        last_entry_at:   { type: string, format: date-time, nullable: true }
+        points_redeemed: { type: integer, description: "fase 2: suma de canjes activos" }
+        points_available: { type: integer, description: "fase 2: earned − redeemed, nunca negativo" }
+    CatalogItem:
+      type: object
+      required: [id, name, description, cost, tier, is_active, created_at, updated_at]
+      properties:
+        id:          { type: string, format: uuid }
+        name:        { type: string, minLength: 3 }
+        description: { type: string }
+        cost:        { type: integer, minimum: 1 }
+        tier:        { type: string, enum: [baratito, medio, alto], description: "derivado de cost, no se envía" }
+        is_active:   { type: boolean }
+        created_at:  { type: string, format: date-time }
+        updated_at:  { type: string, format: date-time }
+    CatalogItemRequest:
+      type: object
+      required: [name, cost]
+      properties:
+        name:        { type: string, minLength: 3 }
+        description: { type: string }
+        cost:        { type: integer, minimum: 1 }
+    CatalogItemEdit:
+      type: object
+      required: [name, cost, is_active]
+      properties:
+        name:        { type: string, minLength: 3 }
+        description: { type: string }
+        cost:        { type: integer, minimum: 1 }
+        is_active:   { type: boolean }
+    Redemption:
+      type: object
+      required: [id, member_id, catalog_item_id, cost_at_redemption, note, status, redeemed_at, updated_at]
+      properties:
+        id:                 { type: string, format: uuid }
+        member_id:          { type: string, format: uuid }
+        catalog_item_id:    { type: string, format: uuid }
+        cost_at_redemption: { type: integer, minimum: 1 }
+        note:               { type: string }
+        status:             { type: string, enum: [active, voided] }
+        redeemed_at:        { type: string, format: date-time }
+        updated_at:         { type: string, format: date-time }
+    RedeemRequest:
+      type: object
+      required: [catalog_item_id, amount, note]
+      properties:
+        catalog_item_id: { type: string, format: uuid }
+        amount:          { type: integer, minimum: 1, description: "híbrido: precargado con el costo del plan, editable" }
+        note:            { type: string, minLength: 10, description: "el porqué del canje, obligatorio" }
+    Member:
+      type: object
+      required: [id, display_name, color]
+      properties:
+        id:           { type: string, format: uuid }
+        display_name: { type: string }
+        color:        { type: string }
+    Problem:
+      type: object
+      description: RFC 7807
+      properties:
+        type:   { type: string }
+        title:  { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        code:   { type: string, description: código de dominio, p.ej. reason_too_short }
+  responses:
+    Problem422:
+      description: Regla de dominio violada
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+
+paths:
+  /entries:
+    post:
+      operationId: awardPoint
+      summary: Abonar un puntito (spec 001)
+      parameters:
+        - $ref: '#/components/parameters/MemberIdHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AwardRequest' }
+      responses:
+        '201':
+          description: Entrada creada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Entry' }
+        '401': { description: Falta X-Member-Id }
+        '403': { description: Actor no existe }
+        '404': { description: Destinatario no existe }
+        '422': { $ref: '#/components/responses/Problem422' }
+    get:
+      operationId: listLedger
+      summary: Ver el libro (spec 002)
+      parameters:
+        - { name: awarded_to, in: query, schema: { type: string, format: uuid } }
+        - { name: status, in: query, schema: { type: string, enum: [active, voided] } }
+        - { name: page_size, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 50 } }
+        - { name: cursor, in: query, schema: { type: string } }
+      responses:
+        '200':
+          description: Página del libro
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LedgerPage' }
+  /entries/{id}:
+    patch:
+      operationId: editEntry
+      summary: Editar un movimiento (spec 003)
+      parameters:
+        - $ref: '#/components/parameters/MemberIdHeader'
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/EditRequest' }
+      responses:
+        '200':
+          description: Entrada editada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Entry' }
+        '401': { description: Falta X-Member-Id }
+        '403': { description: No es el autor }
+        '404': { description: Entrada no existe }
+        '409': { description: Entrada anulada }
+        '422': { $ref: '#/components/responses/Problem422' }
+  /entries/{id}/void:
+    post:
+      operationId: voidEntry
+      summary: Anular un movimiento (spec 004)
+      parameters:
+        - $ref: '#/components/parameters/MemberIdHeader'
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Entrada anulada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Entry' }
+        '401': { description: Falta X-Member-Id }
+        '403': { description: No es el autor }
+        '404': { description: Entrada no existe }
+        '409': { description: Ya estaba anulada }
+  /balances:
+    get:
+      operationId: getBalances
+      summary: Saldos de los titulares (spec 005)
+      responses:
+        '200':
+          description: Saldos
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Balance' }
+  /members:
+    get:
+      operationId: listMembers
+      summary: Titulares
+      responses:
+        '200':
+          description: Titulares
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Member' }
+
+  # ---------- Fase 2 ----------
+  /catalog-items:
+    post:
+      operationId: createCatalogItem
+      summary: Crear un plan del catálogo (spec 006)
+      parameters:
+        - $ref: '#/components/parameters/MemberIdHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CatalogItemRequest' }
+      responses:
+        '201':
+          description: Plan creado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CatalogItem' }
+        '401': { description: Falta X-Member-Id }
+        '422': { $ref: '#/components/responses/Problem422' }
+    get:
+      operationId: listCatalogItems
+      summary: Listar planes (spec 006)
+      parameters:
+        - { name: active, in: query, schema: { type: boolean }, description: "true = solo activos" }
+      responses:
+        '200':
+          description: Planes
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/CatalogItem' }
+  /catalog-items/{id}:
+    patch:
+      operationId: editCatalogItem
+      summary: Editar o desactivar un plan (spec 006)
+      parameters:
+        - $ref: '#/components/parameters/MemberIdHeader'
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CatalogItemEdit' }
+      responses:
+        '200':
+          description: Plan editado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CatalogItem' }
+        '401': { description: Falta X-Member-Id }
+        '404': { description: Plan no existe }
+        '422': { $ref: '#/components/responses/Problem422' }
+  /redemptions:
+    post:
+      operationId: redeem
+      summary: Canjear puntitos por un plan (spec 007)
+      parameters:
+        - $ref: '#/components/parameters/MemberIdHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RedeemRequest' }
+      responses:
+        '201':
+          description: Canje registrado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Redemption' }
+        '401': { description: Falta X-Member-Id }
+        '404': { description: Plan no existe }
+        '409': { description: Plan inactivo }
+        '422': { $ref: '#/components/responses/Problem422', description: "monto no positivo o saldo insuficiente" }
+    get:
+      operationId: listRedemptions
+      summary: Historial de canjes (spec 007)
+      parameters:
+        - { name: member_id, in: query, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Canjes
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Redemption' }
+  /redemptions/{id}/void:
+    post:
+      operationId: voidRedemption
+      summary: Anular un canje (spec 007)
+      parameters:
+        - $ref: '#/components/parameters/MemberIdHeader'
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Canje anulado (devuelve los puntos)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Redemption' }
+        '401': { description: Falta X-Member-Id }
+        '403': { description: No es quien canjeó }
+        '404': { description: Canje no existe }
+        '409': { description: Ya estaba anulado }
