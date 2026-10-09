@@ -63,7 +63,7 @@ func TestMain(m *testing.M) {
 
 // applyMigrations corre en orden todos los *.up.sql del repositorio.
 func applyMigrations(ctx context.Context) error {
-	dir := filepath.Join("..", "..", "..", "..", "..", "data-base", "migrations")
+	dir := filepath.Join("..", "..", "..", "..", "migrations")
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return err
